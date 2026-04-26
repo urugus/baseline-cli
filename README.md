@@ -93,3 +93,8 @@ them with SHA-256 checksums.
 CI and release jobs use GitHub Actions `ubuntu-slim` runners because the build is
 lightweight and does not require Docker, service containers, or privileged
 operations.
+
+Maintainers can also run the release workflow manually with a version such as
+`v0.3.0`. Manual releases create the tag, publish GitHub Release assets, and can
+open a Homebrew tap update PR. The tap PR requires a repository secret named
+`RELEASE_PAT` with push access to `urugus/homebrew-tap`.
