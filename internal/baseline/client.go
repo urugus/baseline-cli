@@ -1,6 +1,7 @@
 package baseline
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -34,7 +35,7 @@ func NewClient(opts ClientOptions) (*Client, error) {
 
 	token := opts.Token
 	if token == "" {
-		token = os.Getenv("BASELINE_API_KEY")
+		token = loadToken()
 	}
 	if token == "" {
 		return nil, errors.New("BASELINE_API_KEY is not set")
@@ -47,6 +48,54 @@ func NewClient(opts ClientOptions) (*Client, error) {
 			Timeout: 30 * time.Second,
 		},
 	}, nil
+}
+
+func loadToken() string {
+	if token := os.Getenv("BASELINE_API_KEY"); token != "" {
+		return token
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+
+	token, _ := readEnvValue(home+"/.zshenv.local", "BASELINE_API_KEY")
+	return token
+}
+
+func readEnvValue(path string, key string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	prefixes := []string{key + "=", "export " + key + "="}
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(line, prefix) {
+				return cleanEnvValue(strings.TrimPrefix(line, prefix)), nil
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+	return "", nil
+}
+
+func cleanEnvValue(value string) string {
+	value = strings.TrimSpace(value)
+	if i := strings.Index(value, " #"); i >= 0 {
+		value = strings.TrimSpace(value[:i])
+	}
+	return strings.Trim(value, `"'`)
 }
 
 func (c *Client) GetJSON(ctx context.Context, path string, query url.Values, out any) error {
