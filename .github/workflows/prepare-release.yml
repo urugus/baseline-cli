@@ -70,3 +70,75 @@ jobs:
             --max-turns 30
             --model claude-sonnet-4-6
             --allowedTools "Bash,Read,Write,Edit,MultiEdit,Glob,Grep"
+
+      - name: Ensure release PR exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          PREVIOUS_TAG: ${{ inputs.previous_tag }}
+          BASE_REF: ${{ inputs.base_ref }}
+        run: |
+          set -euo pipefail
+
+          title="Prepare release ${RELEASE_VERSION}"
+          existing_pr="$(gh pr list --state open --base "${BASE_REF}" --search "${title} in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "${existing_pr}" ]; then
+            echo "Release PR already exists: #${existing_pr}"
+            exit 0
+          fi
+
+          range_start="${PREVIOUS_TAG}"
+          if [ -z "${range_start}" ]; then
+            range_start="$(git tag --list 'v*' --sort=-v:refname | head -n 1)"
+          fi
+          if [ -z "${range_start}" ]; then
+            echo "No previous tag found" >&2
+            exit 1
+          fi
+
+          branch="release/prepare-${RELEASE_VERSION#v}"
+          git checkout -B "${branch}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          notes="$(git log --format='- %s (%h)' "${range_start}..HEAD")"
+          if [ -z "${notes}" ]; then
+            notes="- No repository changes detected since ${range_start}."
+          fi
+
+          {
+            echo "# Changelog"
+            echo
+            echo "## ${RELEASE_VERSION}"
+            echo
+            echo "${notes}"
+            echo
+            echo "Operational follow-up: run the Release workflow manually with ${RELEASE_VERSION} after this PR is merged."
+            echo
+            if [ -f CHANGELOG.md ]; then
+              tail -n +2 CHANGELOG.md
+            fi
+          } > CHANGELOG.md.tmp
+          mv CHANGELOG.md.tmp CHANGELOG.md
+
+          go test ./...
+
+          git add CHANGELOG.md
+          git commit -m "Prepare release ${RELEASE_VERSION}"
+          git push --force-with-lease --set-upstream origin "${branch}"
+
+          gh pr create \
+            --base "${BASE_REF}" \
+            --head "${branch}" \
+            --title "${title}" \
+            --body "$(cat <<EOF
+          ## Summary
+          - Prepare CHANGELOG notes for ${RELEASE_VERSION}
+          - Include commits since ${range_start}
+
+          ## Validation
+          - go test ./...
+
+          Tag and GitHub Release publication remain a human-triggered step through the Release workflow.
+          EOF
+          )"
