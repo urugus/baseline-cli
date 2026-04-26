@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -26,25 +27,43 @@ func newVulnerabilitiesCommand(global *globalOptions) *cobra.Command {
 func newVulnerabilitiesListCommand(global *globalOptions) *cobra.Command {
 	var page int
 	var perPage int
+	var all bool
+	var severity string
+	var status string
+	var asset string
+	var assetID string
+	var project string
 
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List vulnerabilities",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if all && cmd.Flags().Changed("page") {
+				return fmt.Errorf("--page cannot be used with --all")
+			}
 			client, err := baseline.NewClient(baseline.ClientOptions{BaseURL: global.baseURL})
 			if err != nil {
 				return err
 			}
 
-			response, raw, err := client.ListVulnerabilities(context.Background(), baseline.ListVulnerabilitiesOptions{
+			filter := vulnerabilityFilter{
+				severity: severity,
+				status:   status,
+				asset:    asset,
+				project:  project,
+			}
+			response, err := loadVulnerabilities(context.Background(), client, listOptions{
 				Page:    page,
 				PerPage: perPage,
+				All:     all,
+				AssetID: assetID,
+				Filter:  filter,
 			})
 			if err != nil {
 				return err
 			}
 			if global.json {
-				return printJSON(raw)
+				return printVulnerabilityListJSON(response)
 			}
 			return printVulnerabilityList(response)
 		},
@@ -52,6 +71,12 @@ func newVulnerabilitiesListCommand(global *globalOptions) *cobra.Command {
 
 	cmd.Flags().IntVar(&page, "page", 1, "Page number")
 	cmd.Flags().IntVar(&perPage, "per-page", 20, "Items per page")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all pages")
+	cmd.Flags().StringVar(&severity, "severity", "", "Filter by severity")
+	cmd.Flags().StringVar(&status, "status", "", "Filter by status")
+	cmd.Flags().StringVar(&asset, "asset", "", "Filter by asset display name")
+	cmd.Flags().StringVar(&assetID, "asset-id", "", "Filter by asset UUID on the server side")
+	cmd.Flags().StringVar(&project, "project", "", "Filter by project name")
 	return cmd
 }
 
@@ -92,6 +117,116 @@ func printJSON(raw []byte) error {
 	return nil
 }
 
+type listOptions struct {
+	Page    int
+	PerPage int
+	All     bool
+	AssetID string
+	Filter  vulnerabilityFilter
+}
+
+type vulnerabilityFilter struct {
+	severity string
+	status   string
+	asset    string
+	project  string
+}
+
+func loadVulnerabilities(ctx context.Context, client *baseline.Client, opts listOptions) (baseline.PageResponse[baseline.Vulnerability], error) {
+	if opts.PerPage <= 0 {
+		opts.PerPage = 20
+	}
+	if !opts.All {
+		response, _, err := client.ListVulnerabilities(ctx, baseline.ListVulnerabilitiesOptions{
+			Page:    opts.Page,
+			PerPage: opts.PerPage,
+			AssetID: opts.AssetID,
+		})
+		if err != nil {
+			return baseline.PageResponse[baseline.Vulnerability]{}, err
+		}
+		response.Data = filterVulnerabilities(response.Data, opts.Filter)
+		return response, nil
+	}
+
+	var all []baseline.Vulnerability
+	page := 1
+	total := 0
+	for {
+		response, _, err := client.ListVulnerabilities(ctx, baseline.ListVulnerabilitiesOptions{
+			Page:    page,
+			PerPage: opts.PerPage,
+			AssetID: opts.AssetID,
+		})
+		if err != nil {
+			return baseline.PageResponse[baseline.Vulnerability]{}, err
+		}
+		total = response.Total
+		all = append(all, filterVulnerabilities(response.Data, opts.Filter)...)
+		if response.Page*response.PerPage >= response.Total || len(response.Data) == 0 {
+			break
+		}
+		page++
+	}
+
+	return baseline.PageResponse[baseline.Vulnerability]{
+		Data:    all,
+		Page:    1,
+		PerPage: len(all),
+		Total:   total,
+	}, nil
+}
+
+func filterVulnerabilities(vulnerabilities []baseline.Vulnerability, filter vulnerabilityFilter) []baseline.Vulnerability {
+	if filter.isZero() {
+		return vulnerabilities
+	}
+	filtered := make([]baseline.Vulnerability, 0, len(vulnerabilities))
+	for _, vuln := range vulnerabilities {
+		if filter.matches(vuln) {
+			filtered = append(filtered, vuln)
+		}
+	}
+	return filtered
+}
+
+func (f vulnerabilityFilter) isZero() bool {
+	return f.severity == "" && f.status == "" && f.asset == "" && f.project == ""
+}
+
+func (f vulnerabilityFilter) matches(vuln baseline.Vulnerability) bool {
+	if f.severity != "" && !equalFold(vuln.Severity, f.severity) {
+		return false
+	}
+	if f.status != "" && !equalFold(vuln.Status, f.status) {
+		return false
+	}
+	if f.asset != "" && !containsFold(vuln.Asset.DisplayName, f.asset) {
+		return false
+	}
+	if f.project != "" && !containsFold(vuln.Project.Name, f.project) {
+		return false
+	}
+	return true
+}
+
+func equalFold(value string, expected string) bool {
+	return strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(expected))
+}
+
+func containsFold(value string, expected string) bool {
+	return strings.Contains(strings.ToLower(value), strings.ToLower(strings.TrimSpace(expected)))
+}
+
+func printVulnerabilityListJSON(response baseline.PageResponse[baseline.Vulnerability]) error {
+	encoded, err := json.MarshalIndent(response, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(encoded))
+	return nil
+}
+
 func printVulnerabilityList(response baseline.PageResponse[baseline.Vulnerability]) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "NB\tSEVERITY\tSTATUS\tPROJECT\tASSET\tTITLE\tID")
@@ -106,7 +241,7 @@ func printVulnerabilityList(response baseline.PageResponse[baseline.Vulnerabilit
 			vuln.ID,
 		)
 	}
-	fmt.Fprintf(w, "\npage=%d perPage=%d total=%d\n", response.Page, response.PerPage, response.Total)
+	fmt.Fprintf(w, "\nshown=%d total=%d\n", len(response.Data), response.Total)
 	return w.Flush()
 }
 
