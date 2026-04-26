@@ -53,12 +53,11 @@ jobs:
 
             Task:
             1. Determine the comparison range. If previous_tag is empty, use the latest local tag matching v*.
-            2. Inspect commits and merged PRs in that range.
+            2. Inspect commits in that range with local git history.
             3. Create or update CHANGELOG.md with a section for the proposed version.
             4. Include concise user-facing release notes grouped by type when possible.
-            5. Mention any operational follow-up, such as running the Release workflow manually with the proposed version.
-            6. Run lightweight validation such as `go test ./...` if practical.
-            7. Open a pull request against the base ref with the release preparation changes.
+            5. Run `go test ./...`.
+            6. Open a pull request against the base ref with the release preparation changes.
 
             The PR title should be:
             Prepare release ${{ inputs.version }}
@@ -68,5 +67,6 @@ jobs:
             - Validation performed
             - Explicit note that tag/release publication remains a human-triggered step
           claude_args: |
-            --max-turns 10
+            --max-turns 30
             --model claude-sonnet-4-6
+            --allowedTools "Bash(go test ./...),Bash(git status:*),Bash(git log:*),Bash(git tag:*),Bash(git diff:*),Bash(git show:*),Bash(git checkout:*),Bash(git add CHANGELOG.md),Bash(git commit:*),Bash(git push:*)"
