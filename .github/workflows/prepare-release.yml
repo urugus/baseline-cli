@@ -71,6 +71,11 @@ jobs:
             --model claude-sonnet-4-6
             --allowedTools "Bash,Read,Write,Edit,MultiEdit,Glob,Grep"
 
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
       - name: Ensure release PR exists
         env:
           GH_TOKEN: ${{ github.token }}
