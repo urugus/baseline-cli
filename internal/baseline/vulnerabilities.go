@@ -10,6 +10,7 @@ import (
 type ListVulnerabilitiesOptions struct {
 	Page    int
 	PerPage int
+	AssetID string
 }
 
 func (c *Client) ListVulnerabilities(ctx context.Context, opts ListVulnerabilitiesOptions) (PageResponse[Vulnerability], []byte, error) {
@@ -19,6 +20,9 @@ func (c *Client) ListVulnerabilities(ctx context.Context, opts ListVulnerabiliti
 	}
 	if opts.PerPage > 0 {
 		query.Set("perPage", strconv.Itoa(opts.PerPage))
+	}
+	if opts.AssetID != "" {
+		query.Set("asset", opts.AssetID)
 	}
 
 	body, err := c.GetRaw(ctx, "/api/v1/vulnerabilities", query)

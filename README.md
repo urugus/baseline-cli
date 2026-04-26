@@ -55,6 +55,8 @@ source ~/.zshenv.local
 ```sh
 baseline vulnerabilities list
 baseline vulnerabilities list --page 1 --per-page 20
+baseline vulnerabilities list --asset TOKIUM/drwallet-worker --severity critical --all
+baseline vulnerabilities list --asset-id 140e0253-9bbc-4f60-9ad2-e2742aa11b2a --severity critical --all
 baseline vulnerabilities list --json
 baseline vulnerabilities get <id>
 baseline vulnerabilities get <id> --json
