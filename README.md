@@ -98,3 +98,8 @@ Maintainers can also run the release workflow manually with a version such as
 `v0.3.0`. Manual releases create the tag, publish GitHub Release assets, and can
 open a Homebrew tap update PR. The tap PR requires a repository secret named
 `RELEASE_PAT` with push access to `urugus/homebrew-tap`.
+
+Release preparation can be delegated to Claude Code Actions through the
+`Prepare Release PR` workflow. That workflow asks Claude to inspect changes since
+the previous tag and open a release preparation PR, but it is intentionally not
+allowed to create tags, publish releases, or update the Homebrew tap.

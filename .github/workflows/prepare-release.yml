@@ -1,0 +1,72 @@
+name: Prepare Release PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Proposed release version, e.g. v0.3.0"
+        required: true
+      previous_tag:
+        description: "Previous release tag. Leave empty to use the latest v* tag."
+        required: false
+        default: ""
+      base_ref:
+        description: "Base branch or ref"
+        required: true
+        default: "main"
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+  actions: read
+
+jobs:
+  prepare:
+    name: Prepare Release PR
+    runs-on: ubuntu-slim
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.base_ref }}
+
+      - name: Prepare release PR with Claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          prompt: |
+            You are preparing a release PR for the baseline-cli repository.
+
+            Hard boundaries:
+            - Do not create or push git tags.
+            - Do not publish a GitHub Release.
+            - Do not update the Homebrew tap.
+            - Do not change runtime behavior unless required to update release metadata.
+
+            Inputs:
+            - Proposed version: ${{ inputs.version }}
+            - Previous tag: ${{ inputs.previous_tag }}
+            - Base ref: ${{ inputs.base_ref }}
+
+            Task:
+            1. Determine the comparison range. If previous_tag is empty, use the latest local tag matching v*.
+            2. Inspect commits and merged PRs in that range.
+            3. Create or update CHANGELOG.md with a section for the proposed version.
+            4. Include concise user-facing release notes grouped by type when possible.
+            5. Mention any operational follow-up, such as running the Release workflow manually with the proposed version.
+            6. Run lightweight validation such as `go test ./...` if practical.
+            7. Open a pull request against the base ref with the release preparation changes.
+
+            The PR title should be:
+            Prepare release ${{ inputs.version }}
+
+            The PR body should include:
+            - Summary of release contents
+            - Validation performed
+            - Explicit note that tag/release publication remains a human-triggered step
+          claude_args: |
+            --max-turns 10
+            --model claude-sonnet-4-6
