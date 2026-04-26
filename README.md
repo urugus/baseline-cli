@@ -7,6 +7,13 @@ GET-based API calls and does not expose arbitrary URL access.
 
 ## Install
 
+With Homebrew:
+
+```sh
+brew tap urugus/tap
+brew install baseline
+```
+
 From source:
 
 ```sh
