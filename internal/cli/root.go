@@ -29,6 +29,7 @@ func NewRootCommand() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&opts.baseURL, "base-url", "", "Baseline API base URL")
 	cmd.PersistentFlags().BoolVar(&opts.json, "json", false, "Print raw JSON response")
 
+	cmd.AddCommand(newConfigCommand())
 	cmd.AddCommand(newVersionCommand())
 	cmd.AddCommand(newVulnerabilitiesCommand(opts))
 	return cmd

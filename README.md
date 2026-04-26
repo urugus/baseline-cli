@@ -37,17 +37,18 @@ make build
 
 ## Authentication
 
-Set `BASELINE_API_KEY`.
+For CI, set `BASELINE_API_KEY`.
 
 ```sh
 export BASELINE_API_KEY='...'
 ```
 
-If your shell stores it in `~/.zshenv.local`, source it before running this CLI
-from automation:
+For local use, save the key to the baseline config file:
 
 ```sh
-source ~/.zshenv.local
+baseline config set api-key
+baseline config get api-key
+baseline config path
 ```
 
 ## Usage

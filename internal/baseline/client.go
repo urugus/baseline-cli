@@ -8,9 +8,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
+
+	"github.com/urugus/baseline-cli/internal/config"
 )
 
 const defaultBaseURL = "https://baseline-api.issuehunt.io"
@@ -34,10 +35,14 @@ func NewClient(opts ClientOptions) (*Client, error) {
 
 	token := opts.Token
 	if token == "" {
-		token = os.Getenv("BASELINE_API_KEY")
+		var err error
+		token, _, err = config.APIKey()
+		if err != nil {
+			return nil, err
+		}
 	}
 	if token == "" {
-		return nil, errors.New("BASELINE_API_KEY is not set")
+		return nil, errors.New("BASELINE_API_KEY is not set and no api key is configured; run `baseline config set api-key`")
 	}
 
 	return &Client{
