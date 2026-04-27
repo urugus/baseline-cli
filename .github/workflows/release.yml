@@ -18,33 +18,54 @@ on:
   push:
     tags:
       - "v*"
+  pull_request:
+    types: [closed]
+    branches: [main]
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   release:
     name: Release
+    if: >
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.merged == true &&
+       startsWith(github.event.pull_request.head.ref, 'release/prepare-'))
     runs-on: ubuntu-slim
-    env:
-      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
     steps:
-      - name: Validate manual release version
-        if: github.event_name == 'workflow_dispatch'
+      - name: Determine release version
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          if [[ ! "${RELEASE_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "version must look like vX.Y.Z: ${RELEASE_VERSION}" >&2
+          set -euo pipefail
+          case "${EVENT_NAME}" in
+            workflow_dispatch) version="${INPUT_VERSION}" ;;
+            push)              version="${REF_NAME}" ;;
+            pull_request)      version="v${PR_HEAD_REF#release/prepare-}" ;;
+            *) echo "unsupported event: ${EVENT_NAME}" >&2; exit 1 ;;
+          esac
+          if [[ ! "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "version must look like vX.Y.Z: ${version}" >&2
             exit 1
           fi
+          echo "value=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+          ref: ${{ (github.event_name == 'workflow_dispatch' && inputs.ref) || (github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha) || github.ref }}
 
       - name: Create local tag
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name != 'push'
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
         run: |
           if git rev-parse "${RELEASE_VERSION}" >/dev/null 2>&1; then
             echo "tag already exists locally: ${RELEASE_VERSION}" >&2
@@ -65,12 +86,35 @@ jobs:
           cache: true
 
       - name: Build release artifacts
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
         run: make release VERSION=${RELEASE_VERSION}
+
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -euo pipefail
+          notes="$(awk -v ver="${RELEASE_VERSION}" '
+            $0 ~ "^## "ver"([[:space:]]|$)" { in_section=1; next }
+            /^## v/ && in_section { exit }
+            in_section { print }
+          ' CHANGELOG.md)"
+          if [ -z "${notes//[[:space:]]/}" ]; then
+            notes="Release ${RELEASE_VERSION}."
+          fi
+          {
+            echo "body<<RELEASE_NOTES_EOF"
+            printf '%s\n' "${notes}"
+            echo "RELEASE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.RELEASE_VERSION }}
+          tag_name: ${{ steps.version.outputs.value }}
+          body: ${{ steps.notes.outputs.body }}
           files: |
             dist/baseline-darwin-amd64
             dist/baseline-darwin-arm64
@@ -80,11 +124,13 @@ jobs:
             dist/checksums.txt
 
       - name: Push release tag
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name != 'push'
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
         run: git push origin "${RELEASE_VERSION}"
 
       - name: Checkout Homebrew tap
-        if: github.event_name == 'workflow_dispatch' && inputs.update_homebrew
+        if: (github.event_name == 'workflow_dispatch' && inputs.update_homebrew) || github.event_name == 'pull_request'
         uses: actions/checkout@v4
         with:
           repository: urugus/homebrew-tap
@@ -92,7 +138,9 @@ jobs:
           token: ${{ secrets.RELEASE_PAT }}
 
       - name: Update Homebrew formula
-        if: github.event_name == 'workflow_dispatch' && inputs.update_homebrew
+        if: (github.event_name == 'workflow_dispatch' && inputs.update_homebrew) || github.event_name == 'pull_request'
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
         run: |
           ruby .github/scripts/update-homebrew-formula.rb \
             homebrew-tap/Formula/baseline.rb \
@@ -100,10 +148,11 @@ jobs:
             dist/checksums.txt
 
       - name: Create Homebrew tap PR
-        if: github.event_name == 'workflow_dispatch' && inputs.update_homebrew
+        if: (github.event_name == 'workflow_dispatch' && inputs.update_homebrew) || github.event_name == 'pull_request'
         working-directory: homebrew-tap
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
         run: |
           branch="baseline-${RELEASE_VERSION}"
           git config user.name "github-actions[bot]"
