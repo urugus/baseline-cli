@@ -125,6 +125,11 @@ type listOptions struct {
 	Filter  vulnerabilityFilter
 }
 
+type vulnerabilityListResponse struct {
+	baseline.PageResponse[baseline.Vulnerability]
+	ServerTotal int `json:"serverTotal,omitempty"`
+}
+
 type vulnerabilityFilter struct {
 	severity string
 	status   string
@@ -132,7 +137,7 @@ type vulnerabilityFilter struct {
 	project  string
 }
 
-func loadVulnerabilities(ctx context.Context, client *baseline.Client, opts listOptions) (baseline.PageResponse[baseline.Vulnerability], error) {
+func loadVulnerabilities(ctx context.Context, client *baseline.Client, opts listOptions) (vulnerabilityListResponse, error) {
 	if opts.PerPage <= 0 {
 		opts.PerPage = 20
 	}
@@ -143,15 +148,19 @@ func loadVulnerabilities(ctx context.Context, client *baseline.Client, opts list
 			AssetID: opts.AssetID,
 		})
 		if err != nil {
-			return baseline.PageResponse[baseline.Vulnerability]{}, err
+			return vulnerabilityListResponse{}, err
 		}
 		response.Data = filterVulnerabilities(response.Data, opts.Filter)
-		return response, nil
+		list := vulnerabilityListResponse{PageResponse: response}
+		if !opts.Filter.isZero() {
+			list.ServerTotal = response.Total
+		}
+		return list, nil
 	}
 
 	var all []baseline.Vulnerability
 	page := 1
-	total := 0
+	serverTotal := 0
 	for {
 		response, _, err := client.ListVulnerabilities(ctx, baseline.ListVulnerabilitiesOptions{
 			Page:    page,
@@ -159,9 +168,9 @@ func loadVulnerabilities(ctx context.Context, client *baseline.Client, opts list
 			AssetID: opts.AssetID,
 		})
 		if err != nil {
-			return baseline.PageResponse[baseline.Vulnerability]{}, err
+			return vulnerabilityListResponse{}, err
 		}
-		total = response.Total
+		serverTotal = response.Total
 		all = append(all, filterVulnerabilities(response.Data, opts.Filter)...)
 		if response.Page*response.PerPage >= response.Total || len(response.Data) == 0 {
 			break
@@ -169,12 +178,18 @@ func loadVulnerabilities(ctx context.Context, client *baseline.Client, opts list
 		page++
 	}
 
-	return baseline.PageResponse[baseline.Vulnerability]{
-		Data:    all,
-		Page:    1,
-		PerPage: len(all),
-		Total:   total,
-	}, nil
+	list := vulnerabilityListResponse{
+		PageResponse: baseline.PageResponse[baseline.Vulnerability]{
+			Data:    all,
+			Page:    1,
+			PerPage: len(all),
+			Total:   len(all),
+		},
+	}
+	if !opts.Filter.isZero() {
+		list.ServerTotal = serverTotal
+	}
+	return list, nil
 }
 
 func filterVulnerabilities(vulnerabilities []baseline.Vulnerability, filter vulnerabilityFilter) []baseline.Vulnerability {
@@ -218,7 +233,7 @@ func containsFold(value string, expected string) bool {
 	return strings.Contains(strings.ToLower(value), strings.ToLower(strings.TrimSpace(expected)))
 }
 
-func printVulnerabilityListJSON(response baseline.PageResponse[baseline.Vulnerability]) error {
+func printVulnerabilityListJSON(response vulnerabilityListResponse) error {
 	encoded, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {
 		return err
@@ -227,7 +242,7 @@ func printVulnerabilityListJSON(response baseline.PageResponse[baseline.Vulnerab
 	return nil
 }
 
-func printVulnerabilityList(response baseline.PageResponse[baseline.Vulnerability]) error {
+func printVulnerabilityList(response vulnerabilityListResponse) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "NB\tSEVERITY\tSTATUS\tPROJECT\tASSET\tTITLE\tID")
 	for _, vuln := range response.Data {
@@ -241,7 +256,13 @@ func printVulnerabilityList(response baseline.PageResponse[baseline.Vulnerabilit
 			vuln.ID,
 		)
 	}
-	fmt.Fprintf(w, "\nshown=%d total=%d\n", len(response.Data), response.Total)
+	if response.ServerTotal > 0 && response.Total == response.ServerTotal {
+		fmt.Fprintf(w, "\nshown=%d server_total=%d\n", len(response.Data), response.ServerTotal)
+	} else if response.ServerTotal > 0 {
+		fmt.Fprintf(w, "\nshown=%d total=%d server_total=%d\n", len(response.Data), response.Total, response.ServerTotal)
+	} else {
+		fmt.Fprintf(w, "\nshown=%d total=%d\n", len(response.Data), response.Total)
+	}
 	return w.Flush()
 }
 
