@@ -32,118 +32,18 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.base_ref }}
 
-      - name: Prepare release PR with Claude
-        uses: anthropics/claude-code-action@v1
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ github.token }}
-          prompt: |
-            You are preparing a release PR for the baseline-cli repository.
-
-            Hard boundaries:
-            - Do not create or push git tags.
-            - Do not publish a GitHub Release.
-            - Do not update the Homebrew tap.
-            - Do not change runtime behavior unless required to update release metadata.
-
-            Inputs:
-            - Proposed version: ${{ inputs.version }}
-            - Previous tag: ${{ inputs.previous_tag }}
-            - Base ref: ${{ inputs.base_ref }}
-
-            Task:
-            1. Determine the comparison range. If previous_tag is empty, use the latest local tag matching v*.
-            2. Inspect commits in that range with local git history.
-            3. Create or update CHANGELOG.md with a section for the proposed version.
-            4. Include concise user-facing release notes grouped by type when possible.
-            5. Run `go test ./...`.
-            6. Open a pull request against the base ref with the release preparation changes.
-
-            The PR title should be:
-            Prepare release ${{ inputs.version }}
-
-            The PR body should include:
-            - Summary of release contents
-            - Validation performed
-            - Explicit note that tag/release publication remains a human-triggered step
-          claude_args: |
-            --max-turns 30
-            --model claude-sonnet-4-6
-            --allowedTools "Bash,Read,Write,Edit,MultiEdit,Glob,Grep"
-
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
-      - name: Ensure release PR exists
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_PAT || github.token }}
-          RELEASE_VERSION: ${{ inputs.version }}
-          PREVIOUS_TAG: ${{ inputs.previous_tag }}
-          BASE_REF: ${{ inputs.base_ref }}
-        run: |
-          set -euo pipefail
-
-          title="Prepare release ${RELEASE_VERSION}"
-          existing_pr="$(gh pr list --state open --base "${BASE_REF}" --search "${title} in:title" --json number --jq '.[0].number // empty')"
-          if [ -n "${existing_pr}" ]; then
-            echo "Release PR already exists: #${existing_pr}"
-            exit 0
-          fi
-
-          range_start="${PREVIOUS_TAG}"
-          if [ -z "${range_start}" ]; then
-            range_start="$(git tag --list 'v*' --sort=-v:refname | head -n 1)"
-          fi
-          if [ -z "${range_start}" ]; then
-            echo "No previous tag found" >&2
-            exit 1
-          fi
-
-          branch="release/prepare-${RELEASE_VERSION#v}"
-          git checkout -B "${branch}"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          notes="$(git log --format='- %s (%h)' "${range_start}..HEAD")"
-          if [ -z "${notes}" ]; then
-            notes="- No repository changes detected since ${range_start}."
-          fi
-
-          {
-            echo "# Changelog"
-            echo
-            echo "## ${RELEASE_VERSION}"
-            echo
-            echo "${notes}"
-            echo
-            echo "Operational follow-up: run the Release workflow manually with ${RELEASE_VERSION} after this PR is merged."
-            echo
-            if [ -f CHANGELOG.md ]; then
-              tail -n +2 CHANGELOG.md
-            fi
-          } > CHANGELOG.md.tmp
-          mv CHANGELOG.md.tmp CHANGELOG.md
-
-          go test ./...
-
-          git add CHANGELOG.md
-          git commit -m "Prepare release ${RELEASE_VERSION}"
-          git push --force-with-lease --set-upstream origin "${branch}"
-
-          gh pr create \
-            --base "${BASE_REF}" \
-            --head "${branch}" \
-            --title "${title}" \
-            --body "$(cat <<EOF
-          ## Summary
-          - Prepare CHANGELOG notes for ${RELEASE_VERSION}
-          - Include commits since ${range_start}
-
-          ## Validation
-          - go test ./...
-
-          Tag and GitHub Release publication remain a human-triggered step through the Release workflow.
-          EOF
-          )"
+      - name: Prepare release PR with Claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.RELEASE_PAT || github.token }}
+          prompt: '/prepare-release ${{ inputs.version }} "${{ inputs.previous_tag }}" ${{ inputs.base_ref }}'
+          claude_args: |
+            --max-turns 30
+            --model claude-sonnet-4-6
+            --allowedTools "Bash,Read,Write,Edit,MultiEdit,Glob,Grep"
