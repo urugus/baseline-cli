@@ -49,11 +49,9 @@ Insert a new section for `$version` at the top (immediately after the `# Changel
 
 ### Removed
 - (only if applicable)
-
-Operational follow-up: run the Release workflow manually with $version after this PR is merged.
 ```
 
-Use today's UTC date.
+Use today's UTC date. Do not include any "operational follow-up" or workflow notes in CHANGELOG — those belong in the PR body, not the user-facing changelog.
 
 ### 4. Release-notes quality bar
 Write notes a user reading the GitHub release page will understand without context. Specifically:
@@ -90,6 +88,6 @@ Then open the PR with `gh pr create`:
 - `--body` containing:
   - **Summary** — 1–3 bullets describing the user-visible contents of the release (mirror the CHANGELOG highlights, not raw commits).
   - **Validation** — `go test ./...`
-  - A final paragraph: `Tag and GitHub Release publication remain a human-triggered step through the Release workflow.`
+  - A final paragraph: `Merging this PR will automatically publish $version via the Release workflow (tag, GitHub Release, Homebrew tap PR).`
 
 If a PR with the title `Prepare release $version` already exists open against `$base_ref`, do not create a duplicate — update the existing branch instead and report the existing PR number.
