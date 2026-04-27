@@ -135,6 +135,12 @@ jobs:
           path: homebrew-tap
           token: ${{ secrets.RELEASE_PAT }}
 
+      - name: Setup Ruby
+        if: (github.event_name == 'workflow_dispatch' && inputs.update_homebrew) || github.event_name == 'pull_request'
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
       - name: Update Homebrew formula
         if: (github.event_name == 'workflow_dispatch' && inputs.update_homebrew) || github.event_name == 'pull_request'
         env:
