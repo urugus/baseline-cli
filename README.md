@@ -58,10 +58,16 @@ baseline vulnerabilities list
 baseline vulnerabilities list --page 1 --per-page 20
 baseline vulnerabilities list --asset TOKIUM/drwallet-worker --severity critical --all
 baseline vulnerabilities list --asset-id 140e0253-9bbc-4f60-9ad2-e2742aa11b2a --severity critical --all
-baseline vulnerabilities list --json
+baseline vulnerabilities list --format json
+baseline vulnerabilities list --format ndjson
 baseline vulnerabilities get <id>
-baseline vulnerabilities get <id> --json
+baseline vulnerabilities get <id> --format json
 ```
+
+`--format` supports `table`, `json`, and `ndjson`. The default is `table`.
+The legacy `--json` flag is still supported as an alias for `--format json`.
+Use `ndjson` for one-record-per-line output that is easy to stream, filter, and
+pass to coding agents or other command-line tools.
 
 ## Safety Policy
 
