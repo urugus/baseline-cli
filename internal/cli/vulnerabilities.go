@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
+	"io"
 	"strings"
 	"text/tabwriter"
 
@@ -62,10 +62,18 @@ func newVulnerabilitiesListCommand(global *globalOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if global.json {
-				return printVulnerabilityListJSON(response)
+			format, err := outputFormat(global)
+			if err != nil {
+				return err
 			}
-			return printVulnerabilityList(response)
+			switch format {
+			case "json":
+				return printVulnerabilityListJSON(cmd.OutOrStdout(), response)
+			case "ndjson":
+				return printVulnerabilityListNDJSON(cmd.OutOrStdout(), response)
+			default:
+				return printVulnerabilityList(cmd.OutOrStdout(), response)
+			}
 		},
 	}
 
@@ -95,16 +103,40 @@ func newVulnerabilitiesGetCommand(global *globalOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if global.json {
-				return printJSON(raw)
+			format, err := outputFormat(global)
+			if err != nil {
+				return err
 			}
-			return printVulnerabilityDetail(response.Data)
+			switch format {
+			case "json":
+				return printJSON(cmd.OutOrStdout(), raw)
+			case "ndjson":
+				return printVulnerabilityNDJSON(cmd.OutOrStdout(), response.Data)
+			default:
+				return printVulnerabilityDetail(cmd.OutOrStdout(), response.Data)
+			}
 		},
 	}
 	return cmd
 }
 
-func printJSON(raw []byte) error {
+func outputFormat(global *globalOptions) (string, error) {
+	if global.json {
+		return "json", nil
+	}
+	format := strings.ToLower(strings.TrimSpace(global.format))
+	if format == "" {
+		format = "table"
+	}
+	switch format {
+	case "table", "json", "ndjson":
+		return format, nil
+	default:
+		return "", fmt.Errorf("unsupported format %q (supported: table, json, ndjson)", global.format)
+	}
+}
+
+func printJSON(w io.Writer, raw []byte) error {
 	var value any
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return err
@@ -113,7 +145,7 @@ func printJSON(raw []byte) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(string(encoded))
+	fmt.Fprintln(w, string(encoded))
 	return nil
 }
 
@@ -233,17 +265,53 @@ func containsFold(value string, expected string) bool {
 	return strings.Contains(strings.ToLower(value), strings.ToLower(strings.TrimSpace(expected)))
 }
 
-func printVulnerabilityListJSON(response vulnerabilityListResponse) error {
+func printVulnerabilityListJSON(w io.Writer, response vulnerabilityListResponse) error {
 	encoded, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {
 		return err
 	}
-	fmt.Println(string(encoded))
+	fmt.Fprintln(w, string(encoded))
 	return nil
 }
 
-func printVulnerabilityList(response vulnerabilityListResponse) error {
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+type vulnerabilitySummary struct {
+	ID       string `json:"id"`
+	NB       string `json:"nb"`
+	Severity string `json:"severity"`
+	Status   string `json:"status"`
+	Project  string `json:"project"`
+	Asset    string `json:"asset"`
+	Title    string `json:"title"`
+}
+
+func newVulnerabilitySummary(vuln baseline.Vulnerability) vulnerabilitySummary {
+	return vulnerabilitySummary{
+		ID:       vuln.ID,
+		NB:       vuln.NB,
+		Severity: vuln.Severity,
+		Status:   vuln.Status,
+		Project:  vuln.Project.Name,
+		Asset:    vuln.Asset.DisplayName,
+		Title:    vuln.Title,
+	}
+}
+
+func printVulnerabilityListNDJSON(w io.Writer, response vulnerabilityListResponse) error {
+	encoder := json.NewEncoder(w)
+	for _, vuln := range response.Data {
+		if err := encoder.Encode(newVulnerabilitySummary(vuln)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func printVulnerabilityNDJSON(w io.Writer, vuln baseline.Vulnerability) error {
+	return json.NewEncoder(w).Encode(newVulnerabilitySummary(vuln))
+}
+
+func printVulnerabilityList(out io.Writer, response vulnerabilityListResponse) error {
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "NB\tSEVERITY\tSTATUS\tPROJECT\tASSET\tTITLE\tID")
 	for _, vuln := range response.Data {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
@@ -266,8 +334,8 @@ func printVulnerabilityList(response vulnerabilityListResponse) error {
 	return w.Flush()
 }
 
-func printVulnerabilityDetail(vuln baseline.Vulnerability) error {
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+func printVulnerabilityDetail(out io.Writer, vuln baseline.Vulnerability) error {
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(w, "ID:\t%s\n", vuln.ID)
 	fmt.Fprintf(w, "NB:\t%s\n", vuln.NB)
 	fmt.Fprintf(w, "Severity:\t%s\n", vuln.Severity)

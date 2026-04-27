@@ -15,6 +15,7 @@ var (
 type globalOptions struct {
 	baseURL string
 	json    bool
+	format  string
 }
 
 func NewRootCommand() *cobra.Command {
@@ -28,6 +29,7 @@ func NewRootCommand() *cobra.Command {
 
 	cmd.PersistentFlags().StringVar(&opts.baseURL, "base-url", "", "Baseline API base URL")
 	cmd.PersistentFlags().BoolVar(&opts.json, "json", false, "Print raw JSON response")
+	cmd.PersistentFlags().StringVar(&opts.format, "format", "table", "Output format: table, json, ndjson")
 
 	cmd.AddCommand(newConfigCommand())
 	cmd.AddCommand(newVersionCommand())
