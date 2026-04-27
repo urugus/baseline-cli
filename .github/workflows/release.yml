@@ -67,13 +67,17 @@ jobs:
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.value }}
         run: |
-          if git rev-parse "${RELEASE_VERSION}" >/dev/null 2>&1; then
-            echo "tag already exists locally: ${RELEASE_VERSION}" >&2
-            exit 1
-          fi
-          if git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_VERSION}" >/dev/null 2>&1; then
-            echo "tag already exists on origin: ${RELEASE_VERSION}" >&2
-            exit 1
+          set -euo pipefail
+          head_commit="$(git rev-parse HEAD)"
+          if git rev-parse --verify "${RELEASE_VERSION}^{commit}" >/dev/null 2>&1; then
+            existing_commit="$(git rev-parse --verify "${RELEASE_VERSION}^{commit}")"
+            if [ "${existing_commit}" != "${head_commit}" ]; then
+              echo "tag ${RELEASE_VERSION} exists at ${existing_commit}, but HEAD is ${head_commit}" >&2
+              echo "Delete the tag manually if you intend to re-tag." >&2
+              exit 1
+            fi
+            echo "tag ${RELEASE_VERSION} already exists at HEAD, reusing"
+            exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -122,12 +126,6 @@ jobs:
             dist/baseline-linux-arm64
             dist/baseline-windows-amd64.exe
             dist/checksums.txt
-
-      - name: Push release tag
-        if: github.event_name != 'push'
-        env:
-          RELEASE_VERSION: ${{ steps.version.outputs.value }}
-        run: git push origin "${RELEASE_VERSION}"
 
       - name: Checkout Homebrew tap
         if: (github.event_name == 'workflow_dispatch' && inputs.update_homebrew) || github.event_name == 'pull_request'
